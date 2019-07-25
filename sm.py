@@ -488,6 +488,9 @@ def klee(sm0, can_be_zero):
 
 def simulate_nfa(sm, string):
     '''
+        Simulate or run the nondeterministic finite automata <sm>
+        feeding it with the characters of the <string>.
+
         >>> sm = concat('a', 'b', 'b')
         >>> simulate_nfa(sm, "abb")
         True
