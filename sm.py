@@ -4,6 +4,29 @@
 
 import copy
 
+def union_inplace_labeled_sets(lset1, *others):
+    ''' Union the labeled-sets <lset1> *inplace* with the others
+        labeled-sets.
+
+        The final <lset1> will have all the keys (labels) from
+        the others labeled-sets if they are new for <lset1>
+        and it will union the sets whose keys (labels) are in common.
+
+        >>> lset1 = {'A': {1}, 'B': {2, 3}}
+        >>> lset2 = {'A': {4,5}, 'B': {2}, 'C': {6}}
+        >>> lset3 = {'C': {7}, 'D': {8}}
+
+        >>> union_inplace_labeled_sets(lset1, lset2, lset3)
+        >>> lset1
+        {'A': {1, 4, 5}, 'B': {2, 3}, 'C': {6, 7}, 'D': {8}}
+    '''
+    for lset2 in others:
+        for label in lset2:
+            if label not in lset1:
+                lset1[label] = lset2[label]
+            else:
+                lset1[label] |= lset2[label]
+
 def move(state, char):
     ''' Return the state that can be reached from the
         state <state> on input <char>, None if such transition
