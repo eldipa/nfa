@@ -44,7 +44,7 @@ def move_s(states, char):
         >>> move_s({s1, s2}, 'c') == set()
         True
         '''
-    S = set(move(s, char) for s in states)
+    S = frozenset(move(s, char) for s in states)
     return S - {None}
 
 def imm_e_closure(state):
@@ -65,7 +65,7 @@ def imm_e_closure(state):
         >>> imm_e_closure(s3) == set()
         True
         '''
-    reachable_by_e = set(s for s, x in state.trans if x is None)
+    reachable_by_e = frozenset(s for s, x in state.trans if x is None)
     return reachable_by_e
 
 def dbg(set_state, all_states_list):
@@ -118,7 +118,7 @@ def e_closure_s(states):
         stack.extend(new)
         S |= new
 
-    return S
+    return frozenset(S)
 
 class State:
     __slots__ = ('trans', 'next_state_by_input', 'next_state_by_func')
