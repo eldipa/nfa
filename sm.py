@@ -56,14 +56,23 @@ def imm_e_closure(state):
         >>> s2 >> (s1, 'b')
         >>> s2 >> s3
 
-        >>> imm_e_closure(s1) == {s2}
-        True
-
         >>> imm_e_closure(s2) == {s3}
         True
 
         >>> imm_e_closure(s3) == set()
         True
+
+        Note that 'imm_e_closure' comes from 'immediate' e-closure.
+
+        The state 's1' has an e-transition to 's2' and 's2'
+        has an e-transition to 's3': s1->s2->s3
+
+        But the 'immediate' e-closure of 's1' only discovers
+        the immediate state 's2'
+
+        >>> imm_e_closure(s1) == {s2}
+        True
+
         '''
     reachable_by_e = frozenset(s for s, x in state.trans if x is None)
     return reachable_by_e
@@ -74,13 +83,26 @@ def dbg(set_state, all_states_list):
 
 def e_closure_s(states):
     ''' Return the states that can be reached from some state in <states>
-        on e-transitions alone (it is the union of all the imm_e_closure states).
+        on e-transitions alone.
+
+        It is the union of all the imm_e_closure states but works in
+        an iterative way: it finds *all* the states and not just the
+        'immediate' states (see imm_e_closure).
 
         >>> s1, s2, s3 = State(), State(), State()
         >>> s1 >> (s2, 'a')
         >>> s1 >> s2
         >>> s2 >> (s1, 'b')
         >>> s2 >> s3
+
+        The 'immediate' e-closure of 's1' is 's2'.
+
+        >>> imm_e_closure(s1) == {s2}
+        True
+
+        However, 'e_closure_s' does not stop there and retrieves the
+        e-closure states of 's2' and keeps doing it for any
+        new state found in the previous step.
 
         >>> e_closure_s({s1}) == {s1, s2, s3}
         True
@@ -101,7 +123,6 @@ def e_closure_s(states):
         >>> e_closure_s({s[3]}) == {s[3], s[6], s[7], s[1], s[2], s[4]}
         True
 
-        #>>> dbg(e_closure_s({s[3], s[8]}), s)
         >>> e_closure_s({s[3], s[8]}) == {s[i] for i in range(1,9)} - {s[5]}
         True
         '''
@@ -366,13 +387,13 @@ def concat(*args):
         After this, none of the state machine <smi> can be used in
         other construction.
 
-        >>> simulate_nfa(concat(L('a'), 'b'), "ab")
+        >>> simulate_nfa(concat('a', 'b'), "ab")
         True
 
-        >>> simulate_nfa(concat(L('a'), 'b'), "abx")
+        >>> simulate_nfa(concat('a', 'b'), "abx")
         False
 
-        >>> simulate_nfa(concat(L('a'), 'b'), "xab")
+        >>> simulate_nfa(concat('a', 'b'), "xab")
         False
         '''
     sm = NFA()
