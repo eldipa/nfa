@@ -4,29 +4,6 @@
 
 import copy
 
-def union_inplace_labeled_sets(lset1, *others):
-    ''' Union the labeled-sets <lset1> *inplace* with the others
-        labeled-sets.
-
-        The final <lset1> will have all the keys (labels) from
-        the others labeled-sets if they are new for <lset1>
-        and it will union the sets whose keys (labels) are in common.
-
-        >>> lset1 = {'A': {1}, 'B': {2, 3}}
-        >>> lset2 = {'A': {4,5}, 'B': {2}, 'C': {6}}
-        >>> lset3 = {'C': {7}, 'D': {8}}
-
-        >>> union_inplace_labeled_sets(lset1, lset2, lset3)
-        >>> lset1
-        {'A': {1, 4, 5}, 'B': {2, 3}, 'C': {6, 7}, 'D': {8}}
-    '''
-    for lset2 in others:
-        for label in lset2:
-            if label not in lset1:
-                lset1[label] = lset2[label]
-            else:
-                lset1[label] |= lset2[label]
-
 def move(state, char):
     ''' Return the state that can be reached from the
         state <state> on input <char>, None if such transition
@@ -69,6 +46,13 @@ def move_s(states, char):
         '''
     S = frozenset(move(s, char) for s in states)
     return S - {None}
+
+def alphabet(states):
+    A = set()
+    for state in states:
+        A |= state.alphabet()
+
+    return frozenset(A)
 
 def imm_e_closure(state):
     ''' Set of states reachable from <state> using e-transitions alone.
@@ -179,6 +163,12 @@ class State:
             if func(input):
                 s = next_state
         return s
+
+    def alphabet(self):
+        if self.next_state_by_func is not None:
+            raise Exception("The state has a transition that depends on the return of a function which makes the state's alphabet undefined.")
+
+        return frozenset(self.next_state_by_input.keys())
 
     def __rshift__(self, next):
         ''' Add a transition from self to the state <next>.
@@ -546,8 +536,12 @@ def simulate_nfa(sm, string):
         >>> simulate_nfa(sm, "aabb")
         True
 
+        The <sm> given can be a pre-compiled NFA and simulate_nfa()
+        will work too (and faster).
+
         # '(a|b)*abb'
         >>> sm = concat((L('a') | 'b')[:], 'a', 'b', 'b')
+        >>> sm = compile_nfa(sm)
 
         >>> simulate_nfa(sm, "aabbabb")
         True
@@ -562,21 +556,39 @@ def simulate_nfa(sm, string):
         traditional ASCII.
 
         In particular, a valid item can be:
-            - a multi bytes item (string)
+            - a multi bytes item (string, aka "words")
             - a number
             - a frozen set
 
-        Technically any hasheable object will work but their semantics
-        are reserved.
+        Technically any hasheable object will work but they are not
+        officially supported and it may be forbidden in a future
+        for other purposes: their semantics are reserved.
 
         >>> obj1 = frozenset()
         >>> obj2 = frozenset({1})
+
+        Note the "word" + "char" + "number" + "frozenset" NFA
         >>> sm = concat('Symbol', '=', 1, obj1)
+        >>> sm = compile_nfa(sm)
+
         >>> simulate_nfa(sm, ['Symbol', '=', 1, obj1])
+        True
+
+        >>> simulate_nfa(sm, ['Symbol', '=', 2, obj1])
+        False
+
+        >>> simulate_nfa(sm, ['Symbol', '=', 1, obj2])
+        False
+
+        >>> sm = concat('Symbol', '=', 1, L(obj1) | L(obj2))
+        >>> sm = compile_nfa(sm)
+
+        >>> simulate_nfa(sm, ['Symbol', '=', 1, obj2])
         True
 
         Functions wrapped in a L construction can be used to define
         a family o class of items, like "any digit".
+
         >>> sm = concat(L(str.isdigit)[1:], str.isalpha)
         >>> simulate_nfa(sm, "1a")
         True
@@ -584,7 +596,22 @@ def simulate_nfa(sm, string):
         False
         >>> simulate_nfa(sm, "123a")
         True
+
+        However the use fo functions to define a family or a class
+        is not supported by compile_nfa().
+
+        >>> sm = concat(L(str.isdigit)[1:], str.isalpha)
+        >>> sm = compile_nfa(sm)    # byexample: +norm-ws
+        Traceback<...>
+        Exception: The state has a transition that depends on
+        the return of a function which makes the state's alphabet undefined.
         '''
+    if isinstance(sm, NFA):
+        return _simulate_online_nfa(sm, string)
+
+    return _exec_compiled_nfa(sm, string)
+
+def _simulate_online_nfa(sm, string):
     S = e_closure_s({sm.i})
 
     eof = False
@@ -597,4 +624,104 @@ def simulate_nfa(sm, string):
         eof = True
 
     return eof and sm.f in S
+
+def _exec_compiled_nfa(nfa, string):
+    S, finals_S = nfa['endpoints']
+
+    eof = False
+    for c in string:
+        if not S:
+            break
+        S = nfa.get((S, c), frozenset())
+    else:
+        eof = True
+
+    return eof and S in finals_S
+
+def compile_nfa(sm):
+    ''' Compile the given NFA state machine <sm> and return
+        a precomputed NFA lookup table suitable for simulate_nfa()
+    '''
+    next_id = 0
+    id_by_state = {}
+
+    # We are going to maintain two kind of "S" sets:
+    #  - S for sets of States
+    #  - hS a hash (int) that represents a set of States' ids
+    #
+    # The idea is that we use S to compile the whole NFA while
+    # we will store hS (an integer) at the end.
+    #
+    # To compute the hash of a set we use the following _hash() func
+    def _hash(S):
+        nonlocal next_id
+        nonlocal id_by_state
+        ids = []
+        for s in S:
+            id = id_by_state.setdefault(s, next_id)
+            ids.append(id)
+            if id == next_id:
+                next_id += 1
+
+        return hash(frozenset(ids))
+
+    # First, we compute the initial S set from the e-closure
+    # of the initial state. Then computes its hash
+    init_S = e_closure_s({sm.i})
+    init_hS = _hash(init_S)
+
+    # We are going to track which S sets contains the final
+    # state (sm.f). Because at the end we will just need the hashes
+    # of these "final S sets", we will track only their hashes
+    finals_hS = set()
+
+    # The NFA compiled table
+    next_hS_table = {}
+
+    done = set()
+    todo = [(init_S, init_hS)]
+    max_state_cnt = cur_state_cnt = len(init_S)
+    while todo:
+        S, hS = todo.pop()
+        if hS in done:
+            continue
+        done.add(hS)
+
+        # Track that S has the final state
+        if sm.f in S:
+            finals_hS.add(hS)
+
+        # For each acceptable input for the given S, compute
+        # the states that will transition from S on the particular
+        # input. See move_s() and e_closure_s() for a more detailed info.
+        for char in alphabet(S):
+            M = move_s(S, char)
+            next_S = e_closure_s(M)
+
+            next_hS = _hash(next_S)
+
+            # Track in the NFA compiled table only the hashes
+            # and not the sets.
+            assert (hS, char) not in next_hS_table
+            next_hS_table[(hS, char)] = next_hS
+
+            # Push the computed "next S set" to the working queue
+            todo.append((next_S, next_hS))
+            cur_state_cnt += len(next_S)
+
+        cur_state_cnt -= len(S)
+        if cur_state_cnt > max_state_cnt:
+            max_state_cnt = cur_state_cnt
+
+    # stats
+    next_hS_table['stats'] = {
+            'count unique states': len(id_by_state),
+            'max alive states': max_state_cnt,
+            'count S': len(done),
+            'entries': len(next_hS_table),
+            }
+
+    next_hS_table['endpoints'] = (init_hS, frozenset(finals_hS))
+
+    return next_hS_table
 
